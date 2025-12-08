@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=coverage
 #SBATCH --output=logs/coverage_%j.out
 #SBATCH --error=logs/coverage_%j.err
@@ -8,9 +8,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --partition=cpu
+#SBATCH --account=p201093
 #SBATCH --qos=default
 
-# Coverage Assessment for WGS - Meluxina
+# Coverage Assessment for WGS - Meluxina HPC
+# Author: S. Owens (adapted for Meluxina, December 2025)
+# Description: Calculate genome-wide coverage statistics
 
 set -e
 
@@ -19,7 +22,7 @@ date
 
 # Load required modules
 module purge
-module load SAMtools
+module load samtools/1.20-foss-2023a
 
 # Set paths
 ALIGNED=/home/users/u103499/Project
@@ -40,7 +43,7 @@ echo "Coverage analysis directories created"
 echo "Processing BAM files from: ${FILTERED_BAM}"
 
 # Count BAM files
-n_bams=$(ls ${FILTERED_BAM}/*_sorted_filtered_nodup_RG.bam 2>/dev/null | wc -l)
+n_bams=$(ls ${FILTERED_BAM}/*_final.bam 2>/dev/null | wc -l)
 echo "Found ${n_bams} BAM files"
 
 if [ $n_bams -eq 0 ]; then
@@ -67,12 +70,7 @@ for bamfile in ${FILTERED_BAM}/*_final.bam; do
         echo "Generating coverage statistics..."
         samtools coverage "$bamfile" > "${COVERAGE_DIR}/coverage_stats/${sample}_coverage.txt"
         
-        # Generate depth file (this can be large for WGS!)
-        # Only uncomment if you need full per-base depth
-        # echo "Generating depth file (may take a while)..."
-        # samtools depth -@ ${SLURM_CPUS_PER_TASK} "$bamfile" > "${DEPTH_DIR}/${sample}_depth.txt"
-        
-        # Generate coverage histogram (faster alternative)
+        # Generate coverage histogram (faster than full depth)
         echo "Generating coverage histogram..."
         samtools depth -@ ${SLURM_CPUS_PER_TASK} "$bamfile" | \
             awk '{print $3}' | sort -n | uniq -c > "${COVERAGE_DIR}/plots_data/${sample}_depth_histogram.txt"
@@ -157,10 +155,10 @@ echo "Creating sample metadata..."
         if [ -f "$bamfile" ]; then
             sample=$(basename "$bamfile" | sed 's/_final.bam//')
             
-            # Classify as tumor or normal based on filename prefix
-            if [[ "$sample" =~ ^[0-9]+RV[0-9]+_tumor$ ]]; then
+            # Classify as tumor or normal based on filename
+            if [[ "$sample" =~ _tumor$ ]]; then
                 sample_type="tumor"
-            elif [[ "$sample" =~ ^[0-9]+RV[0-9]+_normal$ ]]; then
+            elif [[ "$sample" =~ _normal$ ]]; then
                 sample_type="normal"
             else
                 sample_type="unknown"
