@@ -162,3 +162,22 @@ cnvkit.py heatmap ${CNVKIT}/revised/*.revised.call.cns \
     echo "CNVkit WGS Analysis Summary"
     echo "==========================="
     echo "Analysis completed: $(date)"
+    echo ""
+    echo "Parameters:"
+    echo "  Method: wgs"
+    echo "  Reference: ${REFERENCE}"
+    echo ""
+    echo "Samples processed:"
+    ls -1 ${CNVKIT}/revised/*.revised.call.cns | wc -l
+    echo ""
+    echo "Output files:"
+    echo "  - Results: ${CNVKIT}/"
+    echo "  - Refined: ${CNVKIT}/revised/"
+    echo ""
+} > ${CNVKIT}/cnvkit_summary.txt
+
+echo "========================================="
+echo "CNVkit analysis completed!"
+echo "========================================="
+echo "Summary: ${CNVKIT}/cnvkit_summary.txt"
+date
