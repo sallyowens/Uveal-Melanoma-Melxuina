@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=snp_pileup
 #SBATCH --output=logs/snp_pileup_%A_%a.out
 #SBATCH --error=logs/snp_pileup_%A_%a.err
@@ -8,10 +8,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --partition=cpu
+#SBATCH --account=p201093
 #SBATCH --qos=default
-#SBATCH --array=0-3  # Process 4 pairs at a time
+#SBATCH --array=0-3
 
-# SNP Pileup for FACETS WGS Analysis on Meluxina
+# SNP Pileup for FACETS WGS Analysis on Meluxina HPC
+# Author: S. Owens (adapted for Meluxina, December 2025)
+# Description: Generate SNP pileups for FACETS purity/ploidy analysis
 
 set -e
 
@@ -22,10 +25,7 @@ date
 
 # Load required modules
 module purge
-module load SAMtools
-module load HTSlib
-# If snp-pileup is not available as a module, you'll need to install it
-# Or load it from conda environment
+module load samtools/1.20-foss-2023a
 
 # Set directories
 BAMFILES=/home/users/u103499/Project/processed_bams/final_bams
@@ -42,7 +42,7 @@ mkdir -p logs
 
 echo "FACETS directories created"
 
-# Download and prepare VCF file (only run once)
+# Download and prepare VCF file (only array task 0)
 if [ ${SLURM_ARRAY_TASK_ID} -eq 0 ]; then
     if [ ! -f "${VCF_DIR}/out_sorted.vcf" ]; then
         echo "Downloading and processing VCF file..."
@@ -61,64 +61,61 @@ if [ ${SLURM_ARRAY_TASK_ID} -eq 0 ]; then
                  if($1 ~ /^(chr)?[0-9XY]+$/) print
              }' > ${VCF_DIR}/temp_filtered.vcf
         
-        # Sort the file
+        # Sort
         (grep '^#' ${VCF_DIR}/temp_filtered.vcf; 
          grep -v '^#' ${VCF_DIR}/temp_filtered.vcf | sort -k1,1V -k2,2n) > ${VCF_DIR}/out_sorted.vcf
         
-        # Clean up
         rm -f ${VCF_DIR}/temp_filtered.vcf
-        
         echo "VCF file ready"
     fi
 fi
 
-# Wait for VCF to be ready (if array job 0 is still processing it)
+# Wait for VCF
 sleep 60
 
 # Get list of tumor files
 cd ${BAMFILES}
 TUMOR_FILES=($(ls *_tumor_final.bam 2>/dev/null | sort))
 
-# Calculate which tumor file to process
+# Get current tumor file
 CURRENT_TUMOR=${TUMOR_FILES[${SLURM_ARRAY_TASK_ID}]}
 
 if [ -z "$CURRENT_TUMOR" ]; then
-    echo "No tumor file assigned to array task ${SLURM_ARRAY_TASK_ID}"
+    echo "No tumor file for array task ${SLURM_ARRAY_TASK_ID}"
     exit 0
 fi
 
 echo "Processing tumor: $CURRENT_TUMOR"
 
-# Extract patient ID (e.g., 24RV18_tumor_final.bam -> 24RV18)
+# Extract patient ID
 patient_id=$(echo "$CURRENT_TUMOR" | sed 's/_tumor_final.bam//')
-
 echo "Patient ID: $patient_id"
 
-# Find matching normal file
+# Find normal file
 NORMAL_BAM="${patient_id}_normal_final.bam"
 
-if [ -z "$NORMAL_BAM" ] || [ ! -f "$NORMAL_BAM" ]; then
-    echo "ERROR: No matching normal file found: $NORMAL_BAM"
+if [ ! -f "$NORMAL_BAM" ]; then
+    echo "ERROR: No matching normal: $NORMAL_BAM"
     exit 1
 fi
 
-echo "Found matching pair:"
+echo "Found pair:"
 echo "  Tumor: $CURRENT_TUMOR"
 echo "  Normal: $NORMAL_BAM"
 
-# Check BAM file integrity
-echo "Checking BAM file integrity..."
+# Check BAM integrity
+echo "Checking BAM files..."
 samtools quickcheck "$CURRENT_TUMOR" || { echo "ERROR: Tumor BAM corrupted"; exit 1; }
 samtools quickcheck "$NORMAL_BAM" || { echo "ERROR: Normal BAM corrupted"; exit 1; }
 
 # Index if needed
 if [ ! -f "${CURRENT_TUMOR}.bai" ]; then
-    echo "Indexing tumor BAM..."
+    echo "Indexing tumor..."
     samtools index -@ ${SLURM_CPUS_PER_TASK} "$CURRENT_TUMOR"
 fi
 
 if [ ! -f "${NORMAL_BAM}.bai" ]; then
-    echo "Indexing normal BAM..."
+    echo "Indexing normal..."
     samtools index -@ ${SLURM_CPUS_PER_TASK} "$NORMAL_BAM"
 fi
 
@@ -134,11 +131,11 @@ snp-pileup -q 25 -Q 20 -r 10 \
     "$CURRENT_TUMOR" > "$log_output" 2>&1
 
 if [ $? -eq 0 ] && [ -s "$pileup_output" ]; then
-    echo "✓ SNP pileup completed successfully"
-    echo "  Output size: $(du -h $pileup_output | cut -f1)"
+    echo "✓ SNP pileup completed"
+    echo "  Size: $(du -h $pileup_output | cut -f1)"
     
-    # Sort pileup file
-    echo "Sorting pileup file..."
+    # Sort pileup
+    echo "Sorting pileup..."
     temp_file="${PILEUP_DIR}/${patient_id}.sorted.tmp"
     {
         head -n 1 "$pileup_output"
@@ -150,11 +147,11 @@ if [ $? -eq 0 ] && [ -s "$pileup_output" ]; then
         rm "$pileup_output"
         echo "✓ Sorted pileup created"
     else
-        echo "✗ Error sorting pileup"
+        echo "✗ Error sorting"
         exit 1
     fi
 else
-    echo "✗ Error: SNP pileup failed"
+    echo "✗ SNP pileup failed"
     exit 1
 fi
 
