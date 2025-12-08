@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=bam_qc
 #SBATCH --output=logs/bam_qc_%j.out
 #SBATCH --error=logs/bam_qc_%j.err
@@ -8,21 +8,22 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --partition=cpu
+#SBATCH --account=p201093
 #SBATCH --qos=default
 
-# BAM Quality Check Script for Meluxina
-# Checks BAM files before CNV and variant calling analysis
+# BAM Quality Check Script for Meluxina HPC
+# Author: S. Owens (adapted for Meluxina, December 2025)
+# Description: Comprehensive quality control for WGS BAM files
 
-set -e  # Exit on error
-
+set -e
 echo "Starting BAM quality check..."
 date
 
-# Load required modules (adjust versions as available on Meluxina)
+# Load required modules
 module purge
-module load SAMtools
-module load Picard
-module load Python  # for multiqc
+module load samtools/1.20-foss-2023a
+module load picard/3.2
+module load Java/21.0.5
 
 # Set directories
 BAM_DIR=/home/users/u103499/Project/grp1
@@ -66,70 +67,57 @@ for bamfile in ${BAM_DIR}/*.bam; do
         echo "Processing: $sample"
         echo "========================================="
         
-        # Check if BAM is indexed, if not create index
+        # Check if BAM is indexed
         if [ ! -f "${bamfile}.bai" ]; then
             echo "Creating BAM index..."
             samtools index -@ 8 "$bamfile"
         fi
         
-        # 1. Basic BAM statistics
+        # Basic BAM statistics
         echo "Generating basic statistics..."
         samtools flagstat -@ 8 "$bamfile" > "${STATS_DIR}/${sample}_flagstat.txt"
         samtools stats -@ 8 "$bamfile" > "${STATS_DIR}/${sample}_stats.txt"
         
-        # 2. Coverage statistics per chromosome
+        # Coverage statistics per chromosome
         echo "Calculating coverage statistics..."
         samtools coverage "$bamfile" > "${STATS_DIR}/${sample}_coverage.txt"
         
-        # 3. Insert size metrics (for paired-end data)
+        # Insert size metrics
         echo "Collecting insert size metrics..."
-        picard CollectInsertSizeMetrics \
+        java -jar $PICARD_JAR CollectInsertSizeMetrics \
             I="$bamfile" \
             O="${METRICS_DIR}/${sample}_insert_size_metrics.txt" \
             H="${PLOTS_DIR}/${sample}_insert_size_histogram.pdf" \
             VALIDATION_STRINGENCY=LENIENT
         
-        # 4. Alignment summary metrics
+        # Alignment summary metrics
         echo "Collecting alignment summary metrics..."
-        picard CollectAlignmentSummaryMetrics \
+        java -jar $PICARD_JAR CollectAlignmentSummaryMetrics \
             I="$bamfile" \
             O="${METRICS_DIR}/${sample}_alignment_metrics.txt" \
-            R=/project/home/p201093/alignment/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+            R=${REFERENCE} \
             VALIDATION_STRINGENCY=LENIENT
         
-        # 5. GC bias metrics
+        # GC bias metrics
         echo "Collecting GC bias metrics..."
-        picard CollectGcBiasMetrics \
+        java -jar $PICARD_JAR CollectGcBiasMetrics \
             I="$bamfile" \
             O="${METRICS_DIR}/${sample}_gc_bias_metrics.txt" \
             CHART="${PLOTS_DIR}/${sample}_gc_bias_metrics.pdf" \
             S="${METRICS_DIR}/${sample}_gc_bias_summary.txt" \
-            R=/project/home/p201093/alignment/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+            R=${REFERENCE} \
             VALIDATION_STRINGENCY=LENIENT
         
-        # 6. Extract key metrics for summary
+        # Extract key metrics
         echo "Extracting key QC metrics..."
         
-        # Total reads
         total_reads=$(grep "^SN" "${STATS_DIR}/${sample}_stats.txt" | grep "raw total sequences:" | awk '{print $NF}')
-        
-        # Mapped reads
         mapped_reads=$(grep "^SN" "${STATS_DIR}/${sample}_stats.txt" | grep "reads mapped:" | awk '{print $NF}')
-        
-        # Mapping percentage
         mapping_pct=$(grep "mapped (" "${STATS_DIR}/${sample}_flagstat.txt" | head -1 | sed 's/.*(\(.*\):.*/\1/')
-        
-        # Duplicate rate
         duplicates=$(grep "duplicates" "${STATS_DIR}/${sample}_flagstat.txt" | awk '{print $1}')
         dup_rate=$(awk "BEGIN {printf \"%.2f\", ($duplicates/$total_reads)*100}")
-        
-        # Mean coverage
         mean_cov=$(awk 'NR>1 {sum+=$7*$3; bases+=$3} END {if(bases>0) print sum/bases; else print 0}' "${STATS_DIR}/${sample}_coverage.txt")
-        
-        # Properly paired
         properly_paired_pct=$(grep "properly paired (" "${STATS_DIR}/${sample}_flagstat.txt" | sed 's/.*(\(.*\):.*/\1/')
-        
-        # Mean insert size
         mean_insert=$(grep "^MEDIAN_INSERT_SIZE" "${METRICS_DIR}/${sample}_insert_size_metrics.txt" | tail -1 | awk '{print $1}')
         
         echo "Sample: $sample" >> "${QC_DIR}/qc_summary_temp.txt"
@@ -141,7 +129,6 @@ for bamfile in ${BAM_DIR}/*.bam; do
         echo "  Mean insert size: ${mean_insert}" >> "${QC_DIR}/qc_summary_temp.txt"
         echo "" >> "${QC_DIR}/qc_summary_temp.txt"
         
-        # Create CSV entry for R analysis
         echo "${sample},${total_reads},${mapped_reads},${mapping_pct},${dup_rate},${mean_cov},${properly_paired_pct},${mean_insert}" >> "${QC_DIR}/qc_metrics.csv"
         
         echo "Completed QC for: $sample"
@@ -173,7 +160,6 @@ sed -i '1i\sample,total_reads,mapped_reads,mapping_pct,duplicate_rate,mean_cover
     echo "Quality Flags to Review:"
     echo "=========================================="
     
-    # Check for potential issues
     awk -F',' 'NR>1 {
         if ($4 > 30) print "WARNING: High duplicate rate for " $1 ": " $4 "%"
         if ($3 < 95) print "WARNING: Low mapping rate for " $1 ": " $3
