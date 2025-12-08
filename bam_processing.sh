@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=bam_process
 #SBATCH --output=logs/bam_process_%A_%a.out
 #SBATCH --error=logs/bam_process_%A_%a.err
@@ -8,12 +8,13 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --partition=cpu
+#SBATCH --account=p201093
 #SBATCH --qos=default
-#SBATCH --array=0-3  # Process 4 pairs at a time
+#SBATCH --array=0-3
 
-# BAM Processing Script for Meluxina
-# Adds read groups, filters, removes duplicates
-# For files with T_ (tumor) and B_ (blood/normal) prefixes
+# BAM Processing Script for Meluxina HPC
+# Author: S. Owens (adapted for Meluxina, December 2025)
+# Description: Add read groups, filter reads, remove duplicates from WGS BAM files
 
 set -e
 
@@ -24,9 +25,9 @@ date
 
 # Load required modules
 module purge
-module load SAMtools
-module load Picard
-module load Java
+module load samtools/1.20-foss-2023a
+module load picard/3.2
+module load Java/21.0.5
 
 # Set directories
 BAM_DIR=/home/users/u103499/Project/grp1
@@ -42,7 +43,7 @@ mkdir -p logs
 cd ${BAM_DIR}
 TUMOR_BAMS=($(ls T_*.final.bam 2>/dev/null | sort))
 
-# Calculate which tumor file to process based on array task ID
+# Calculate which tumor file to process
 CURRENT_TUMOR=${TUMOR_BAMS[${SLURM_ARRAY_TASK_ID}]}
 
 if [ -z "$CURRENT_TUMOR" ]; then
@@ -56,7 +57,7 @@ echo "Processing tumor BAM: $CURRENT_TUMOR"
 patient_id=$(echo "$CURRENT_TUMOR" | sed 's/T_\(.*\)\.final\.bam/\1/')
 echo "Patient ID: $patient_id"
 
-# Find corresponding normal (blood) file
+# Find corresponding normal file
 NORMAL_BAM="B_${patient_id}.final.bam"
 
 if [ ! -f "$NORMAL_BAM" ]; then
@@ -85,20 +86,18 @@ echo "Tumor Read Groups:"
 echo "  $TUMOR_RGID"
 echo "  $TUMOR_RGLB"
 echo "  $TUMOR_RGSM"
-echo "  $TUMOR_RGPL"
-echo "  $TUMOR_RGPU"
 echo ""
 
 # Add read groups to tumor
 echo "Adding read groups to tumor BAM..."
-picard AddOrReplaceReadGroups \
+java -jar $PICARD_JAR AddOrReplaceReadGroups \
     I=${BAM_DIR}/${CURRENT_TUMOR} \
     O=${OUTPUT_DIR}/intermediate_files/${patient_id}_tumor_RG.bam \
-    RGID=${TUMOR_RGID#ID:} \
-    RGLB=${TUMOR_RGLB#LB:} \
-    RGPL=${TUMOR_RGPL#PL:} \
-    RGPU=${TUMOR_RGPU#PU:} \
-    RGSM=${TUMOR_RGSM#SM:} \
+    RGID=${patient_id}_tumor \
+    RGLB=WGS_${patient_id}_tumor \
+    RGPL=ILLUMINA \
+    RGPU=${patient_id}_tumor \
+    RGSM=${patient_id}_tumor \
     VALIDATION_STRINGENCY=LENIENT
 
 # Filter tumor BAM
@@ -111,7 +110,7 @@ samtools view -@ ${SLURM_CPUS_PER_TASK} -b -F 4 \
 
 # Remove duplicates from tumor
 echo "Removing duplicates from tumor BAM..."
-picard MarkDuplicates \
+java -jar $PICARD_JAR MarkDuplicates \
     INPUT=${OUTPUT_DIR}/intermediate_files/${patient_id}_tumor_filtered.bam \
     OUTPUT=${OUTPUT_DIR}/final_bams/${patient_id}_tumor_final.bam \
     REMOVE_DUPLICATES=true \
@@ -141,20 +140,18 @@ echo "Normal Read Groups:"
 echo "  $NORMAL_RGID"
 echo "  $NORMAL_RGLB"
 echo "  $NORMAL_RGSM"
-echo "  $NORMAL_RGPL"
-echo "  $NORMAL_RGPU"
 echo ""
 
 # Add read groups to normal
 echo "Adding read groups to normal BAM..."
-picard AddOrReplaceReadGroups \
+java -jar $PICARD_JAR AddOrReplaceReadGroups \
     I=${BAM_DIR}/${NORMAL_BAM} \
     O=${OUTPUT_DIR}/intermediate_files/${patient_id}_normal_RG.bam \
-    RGID=${NORMAL_RGID#ID:} \
-    RGLB=${NORMAL_RGLB#LB:} \
-    RGPL=${NORMAL_RGPL#PL:} \
-    RGPU=${NORMAL_RGPU#PU:} \
-    RGSM=${NORMAL_RGSM#SM:} \
+    RGID=${patient_id}_normal \
+    RGLB=WGS_${patient_id}_normal \
+    RGPL=ILLUMINA \
+    RGPU=${patient_id}_normal \
+    RGSM=${patient_id}_normal \
     VALIDATION_STRINGENCY=LENIENT
 
 # Filter normal BAM
@@ -167,7 +164,7 @@ samtools view -@ ${SLURM_CPUS_PER_TASK} -b -F 4 \
 
 # Remove duplicates from normal
 echo "Removing duplicates from normal BAM..."
-picard MarkDuplicates \
+java -jar $PICARD_JAR MarkDuplicates \
     INPUT=${OUTPUT_DIR}/intermediate_files/${patient_id}_normal_filtered.bam \
     OUTPUT=${OUTPUT_DIR}/final_bams/${patient_id}_normal_final.bam \
     REMOVE_DUPLICATES=true \
