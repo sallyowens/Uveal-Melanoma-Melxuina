@@ -1,85 +1,129 @@
-# WGS Analysis Pipeline for Meluxina HPC
+# Whole Genome Sequencing Analysis Pipeline for Uveal Melanoma
 
-Whole genome sequencing (WGS) analysis pipeline adapted for the Meluxina supercomputer in Luxembourg. This pipeline processes matched tumor-normal BAM files for CNV analysis and somatic variant calling.
+Comprehensive bioinformatics pipeline for copy number variation (CNV) analysis and tumor characterization from paired tumor-normal whole genome sequencing data.
 
-## 📋 Overview
+## Overview
 
-This pipeline processes pre-aligned WGS BAM files (T_*.final.bam for tumor, B_*.final.bam for normal) through:
+This pipeline processes WGS BAM files to perform:
+- Quality control assessment
+- Coverage analysis
+- Copy number variation detection (CNVkit)
+- Tumor purity and ploidy estimation (FACETS)
 
-1. **Quality Control** - Comprehensive BAM file quality assessment
-2. **BAM Processing** - Add read groups, filter low-quality reads, remove duplicates
-3. **Coverage Analysis** - Genome-wide coverage statistics and metrics
-4. **CNVkit** - Copy number variation detection and calling
-5. **FACETS** - Tumor purity, ploidy estimation, and CNV analysis
+**Institution**: MeluXina HPC  
+**Reference Genome**: GRCh38 (hg38)  
+**Sample Type**: Paired tumor-normal WGS samples
 
-## 🖥️ System Requirements
+---
 
-**Meluxina HPC Cluster**
-- Account with project allocation (e.g., p201093)
-- Access to CPU partition
-- Sufficient quota for large BAM files (703MB - 47GB per file)
+## Table of Contents
 
-**Software (via modules)**
-- samtools/1.20-foss-2023a
-- picard/3.2
-- Java/21.0.5
-- Python/3.12.3-GCCcore-13.3.0
-- R/4.4.2-gfbf-2024a
+- [Pipeline Overview](#pipeline-overview)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Directory Structure](#directory-structure)
+- [Input Data](#input-data)
+- [Usage](#usage)
+- [Output Files](#output-files)
+- [Workflow Details](#workflow-details)
+- [Troubleshooting](#troubleshooting)
+- [Citation](#citation)
+- [Contact](#contact)
 
-## 📁 Directory Structure
+---
 
+## Pipeline Overview
 ```
-/home/users/u103499/Project/
-├── grp1/                          # Original BAM files (T_ and B_ prefixed)
-│   ├── T_24RV18.final.bam
-│   ├── T_24RV18.final.bam.bai
-│   ├── B_24RV18.final.bam
-│   ├── B_24RV18.final.bam.bai
-│   └── ... (additional sample pairs)
-├── scripts/                       # SLURM job scripts
-│   ├── bam_qc.sh
-│   ├── bam_processing.sh
-│   ├── coverage.sh
-│   ├── cnvkit.sh
-│   └── snp_pileup.sh
-├── logs/                          # SLURM output/error logs
-├── reference/                     # Reference genome (GRCh38)
-│   ├── GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
-│   └── GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai
-├── bam_qc/                       # QC results
-├── processed_bams/               # Processed BAM files
-│   ├── final_bams/
-│   │   ├── 24RV18_tumor_final.bam
-│   │   ├── 24RV18_normal_final.bam
-│   │   └── ...
-│   └── metrics/
-├── coverage/                     # Coverage analysis results
-├── CNVkit/                       # CNVkit CNV results
-└── FACETS/                       # FACETS purity/ploidy results
+BAM Files (*.final.bam)
+    ↓
+[1. BAM QC] → Quality metrics, coverage statistics, duplication rates
+    ↓
+[2. Coverage Analysis] → Genome-wide depth analysis
+    ↓
+[3. CNVkit] → Copy number variation detection
+    ↓
+[4. SNP Pileup] → Extract SNP information for FACETS
+    ↓
+[5. FACETS] → Tumor purity, ploidy, and refined CNV calls
 ```
 
-## 🚀 Quick Start
+---
 
-### 1. Initial Setup
+## Requirements
 
+### Software Dependencies
+- **Samtools** v1.17
+- **Picard** v2.27.5
+- **FastQC** v0.12.1
+- **MultiQC** v1.14
+- **CNVkit** v0.9.10
+- **snp-pileup** (from FACETS suite)
+- **BWA** v0.7.18
+- **Cutadapt** v5.2
+- **R** v4.2.3
+  - facets v0.6.2
+  - ggplot2, dplyr, tidyr, readr
+
+### Compute Resources
+- **HPC System**: SLURM job scheduler
+- **Storage**: ~500 GB for intermediate and output files
+- **Reference Genome**: GRCh38 (~3 GB)
+
+---
+
+## Installation
+
+### 1. Clone Repository
 ```bash
-# Navigate to project directory
-cd /home/users/u103499/Project
-
-# Create necessary directories
-mkdir -p scripts logs reference
-
-# Upload your BAM files to grp1/
-# Upload scripts to scripts/
-# Make scripts executable
-cd scripts
-chmod +x *.sh
+git clone https://github.com/YOUR_USERNAME/wgs-uvm-analysis.git
+cd wgs-uvm-analysis
 ```
 
-### 2. Download Reference Genome (One-time)
-
+### 2. Set Up Conda Environment
 ```bash
-cd /home/users/u103499/Project/reference
+# Install Miniconda (if not already installed)
+cd ~/Project
+mkdir -p software
+cd software
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh -b -p ~/Project/software/miniconda3
+rm Miniconda3-latest-Linux-x86_64.sh
+
+# Initialize conda
+~/Project/software/miniconda3/bin/conda init bash
+source ~/.bashrc
+```
+
+### 3. Create Analysis Environment
+```bash
+# Create environment with all tools
+conda create -n wgs_analysis python=3.10 -y
+conda activate wgs_analysis
+
+# Install bioinformatics tools
+conda install -c bioconda -c conda-forge \
+    samtools=1.17 \
+    picard=2.27.5 \
+    fastqc=0.12.1 \
+    multiqc=1.14 \
+    cnvkit=0.9.10 \
+    snp-pileup \
+    htslib \
+    bwa \
+    cutadapt \
+    r-base=4.2 \
+    r-ggplot2 \
+    r-dplyr \
+    r-tidyr \
+    r-readr \
+    r-facets \
+    -y
+```
+
+### 4. Download Reference Genome
+```bash
+mkdir -p ~/Project/reference
+cd ~/Project/reference
 
 # Download GRCh38 reference
 wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.26_GRCh38/GRCh38_major_release_seqs_for_alignment_pipelines/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
@@ -90,310 +134,387 @@ gunzip GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
 wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.26_GRCh38/GRCh38_major_release_seqs_for_alignment_pipelines/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai
 ```
 
-### 3. Submit Jobs
-
+### 5. Create Directory Structure
 ```bash
-cd /home/users/u103499/Project/scripts
+mkdir -p ~/Project/{logs,scripts,bam_qc,cnvkit,coverage,FACETS/{VCF,pileups,results,plots,reports},tmp}
+```
 
-# Step 1: Quality Control (12 hours)
-sbatch bam_qc.sh
+---
 
-# Step 2: Process BAMs (48 hours) - after QC completes
-sbatch bam_processing.sh
+## Directory Structure
+```
+Project/
+├── grp1/                          # Input BAM files
+│   ├── T_24RV18.final.bam        # Tumor samples (T_*)
+│   ├── B_24RV18.final.bam        # Normal samples (B_*)
+│   └── *.bai                      # BAM index files
+├── scripts/                       # Analysis scripts
+│   ├── bam_qc_check.sh
+│   ├── coverage_analysis.sh
+│   ├── cnvkit_analysis.sh
+│   ├── snp_pileup.sh
+│   └── facets_analysis.R
+├── logs/                          # SLURM job logs
+├── reference/                     # Reference genome
+│   └── GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
+├── bam_qc/                        # QC results
+│   ├── stats/
+│   └── multiqc_report/
+├── coverage/                      # Coverage analysis
+│   ├── coverage_stats/
+│   ├── depth_files/
+│   └── plots_data/
+├── cnvkit/                        # CNVkit results
+│   ├── raw/
+│   └── revised/
+└── FACETS/                        # FACETS analysis
+    ├── VCF/
+    ├── pileups/
+    ├── results/
+    ├── plots/
+    └── reports/
+```
 
-# Step 3: Coverage Analysis (24 hours) - after processing
-sbatch coverage.sh
+---
 
-# Step 4: CNVkit (48 hours) - after processing
-sbatch cnvkit.sh
+## Input Data
 
-# Step 5: FACETS SNP Pileup (72 hours) - after processing
+### File Naming Convention
+- **Tumor samples**: `T_[SAMPLE_ID].final.bam`
+- **Normal samples**: `B_[SAMPLE_ID].final.bam`
+- Index files: `*.final.bam.bai`
+
+### Required File Properties
+- Coordinate-sorted BAM files
+- Read groups present
+- Duplicates marked/removed
+- hg38/GRCh38 alignment
+
+### Sample Data Structure
+```
+grp1/
+├── T_24RV18.final.bam (53 GB)  →  B_24RV18.final.bam (25 GB)
+├── T_24RV21.final.bam (58 GB)  →  B_24RV21.final.bam (30 GB)
+├── T_24RV22.final.bam (55 GB)  →  B_24RV22.final.bam (26 GB)
+└── T_24RV24.final.bam (45 GB)  →  B_24RV24.final.bam (27 GB)
+```
+
+---
+
+## Usage
+
+### Update SLURM Account in Scripts
+
+Before running, update the account in all scripts:
+```bash
+cd ~/Project/scripts
+
+# Replace p201093 with your account number in all scripts
+sed -i 's/p201093/YOUR_ACCOUNT/g' *.sh
+```
+
+### Step 1: BAM Quality Control
+```bash
+cd ~/Project/scripts
+sbatch bam_qc_check.sh
+
+# Monitor progress
+squeue -u $USER
+tail -f ~/Project/logs/bam_qc_*.out
+```
+
+**Runtime**: ~2-4 hours  
+**Output**: QC metrics, flagstat, coverage statistics, MultiQC report
+
+### Step 2: Coverage Analysis (Optional)
+```bash
+sbatch coverage_analysis.sh
+```
+
+**Runtime**: ~6-12 hours  
+**Output**: Genome-wide depth files, coverage statistics, sample metadata
+
+### Step 3: CNVkit Analysis
+```bash
+sbatch cnvkit_analysis.sh
+```
+
+**Runtime**: ~12-24 hours  
+**Output**: Copy number segments, scatter plots, chromosome diagrams
+
+### Step 4: SNP Pileup for FACETS
+```bash
 sbatch snp_pileup.sh
 ```
 
-### 4. Monitor Jobs
+**Runtime**: ~24-48 hours  
+**Output**: Sorted pileup files for FACETS
 
+### Step 5: FACETS Analysis
 ```bash
-# Check job status
-squeue -u u103499
-
-# View output log (replace JOB_ID)
-tail -f logs/bam_qc_JOB_ID.out
-
-# Check job history
-sacct -u u103499 --format=JobID,JobName,State,ExitCode,Elapsed
+sbatch --wrap="Rscript ~/Project/scripts/facets_analysis.R" \
+       --job-name=facets_R \
+       --account=p201093 \
+       --partition=cpu \
+       --qos=default \
+       --output=~/Project/logs/facets_R_%j.out \
+       --error=~/Project/logs/facets_R_%j.err \
+       --cpus-per-task=4 \
+       --mem=32G \
+       --time=06:00:00
 ```
 
-## 🔧 Scripts Overview
-
-### bam_qc.sh
-**Purpose:** Comprehensive quality control for BAM files
-
-**Resources:**
-- Time: 12 hours
-- CPUs: 8
-- Memory: 32GB
-
-**Metrics Collected:**
-- Mapping statistics (flagstat)
-- Per-base statistics
-- Coverage per chromosome
-- Insert size distribution
-- Alignment summary
-- GC bias
-
-**Outputs:**
-- `bam_qc/BAM_QC_Report.txt` - Summary report
-- `bam_qc/qc_metrics.csv` - CSV for R analysis
-- `bam_qc/stats/` - Individual sample stats
-- `bam_qc/metrics/` - Picard metrics
-- `bam_qc/plots/` - QC plots (PDF)
+**Runtime**: ~2-6 hours  
+**Output**: Purity/ploidy estimates, refined CNV calls, FACETS plots
 
 ---
 
-### bam_processing.sh
-**Purpose:** Add read groups, filter reads, remove duplicates
+## Output Files
 
-**Resources:**
-- Time: 48 hours
-- CPUs: 16
-- Memory: 64GB
-- Array: 0-3 (processes 4 pairs simultaneously)
+### BAM QC
+- `BAM_QC_Summary_Report.txt` - Comprehensive QC summary
+- `multiqc_report.html` - Interactive QC dashboard
+- `*_flagstat.txt` - Alignment statistics
+- `*_duplication_metrics.txt` - Duplication rates
 
-**Processing Steps:**
-1. Add read groups (RGID, RGSM, RGPL, etc.)
-2. Filter supplementary alignments (flag 0x800)
-3. Filter secondary alignments (flag 0x100)
-4. Filter unmapped reads (flag 0x4)
-5. Filter low MAPQ reads (<10)
-6. Remove duplicates with Picard MarkDuplicates
-7. Index final BAMs
+### Coverage Analysis
+- `all_samples_coverage.txt` - Combined coverage data
+- `sample_metadata.txt` - Sample type classification
+- `*_depth.txt.gz` - Compressed depth files
+- `coverage_summary.txt` - Analysis summary
 
-**Outputs:**
-- `processed_bams/final_bams/{patient_id}_tumor_final.bam`
-- `processed_bams/final_bams/{patient_id}_normal_final.bam`
-- `processed_bams/metrics/{patient_id}_{tumor|normal}_dup_metrics.txt`
+### CNVkit
+- `*.revised.call.cns` - Final copy number segments
+- `*.scatter.pdf` - Genome-wide CNV plots
+- `*.diagram.pdf` - Chromosome-level diagrams
+- `cnvkit_summary.txt` - Analysis parameters
 
----
-
-### coverage.sh
-**Purpose:** Calculate genome-wide coverage statistics
-
-**Resources:**
-- Time: 24 hours
-- CPUs: 8
-- Memory: 32GB
-
-**Outputs:**
-- `coverage/coverage_stats/` - Per-sample coverage
-- `coverage/combined_coverage_summary.txt` - Overall summary
-- `coverage/plots_data/all_samples_coverage.txt` - R-ready data
-- `coverage/plots_data/sample_metadata.txt` - Sample classifications
+### FACETS
+- `segments_[SAMPLE].csv` - Copy number segments with purity/ploidy
+- `facets_[SAMPLE].png` - Main FACETS plot
+- `spider_[SAMPLE].png` - Purity-ploidy spider plot
+- `facets_summary_all_samples.csv` - Combined results table
+- `fit_[SAMPLE].rds` - R object for reanalysis
 
 ---
 
-### cnvkit.sh
-**Purpose:** Copy number variation detection
+## Workflow Details
 
-**Resources:**
-- Time: 48 hours
-- CPUs: 16
-- Memory: 128GB
+### 1. BAM Quality Control
+- Validates BAM integrity
+- Checks for read groups
+- Calculates alignment statistics
+- Assesses duplication rates
+- Generates per-chromosome coverage
+- Creates MultiQC aggregate report
 
-**Two-Phase Analysis:**
-1. **Initial calling:** Standard CNV detection
-2. **Refined calling:** Purity normalization and segmentation refinement
+**Key Metrics**:
+- Mapping rate (expect >95%)
+- Duplication rate (expect <30%)
+- Mean coverage (expect 30-60x for WGS)
 
-**Outputs:**
-- `CNVkit/results/*.cnr` - Copy number ratios
-- `CNVkit/results/revised/*.revised.call.cns` - Final CNV calls
-- `CNVkit/results/revised/*.scatter.png` - Visualization plots
-- `CNVkit/results/revised/*.seg` - SEG format for IGV
-- `CNVkit/results/revised/*.bed` - BED format
-- `CNVkit/results/revised/*.vcf` - VCF format
-- `CNVkit/results/revised/all_samples_heatmap.pdf` - Multi-sample heatmap
+### 2. Coverage Analysis
+- Generates genome-wide depth profiles
+- Creates coverage histograms
+- Calculates per-chromosome statistics
+- Classifies samples as tumor/normal
+
+**Output Format**: Tab-delimited files compatible with R/Python
+
+### 3. CNVkit - Copy Number Detection
+**Method**: WGS mode (bin-based approach)
+
+**Parameters**:
+- Bin size: Automatically determined for WGS
+- Segmentation: CBS algorithm
+- Copy number calling: Clonal method
+
+**Workflow**:
+1. Create genome access file
+2. Batch process tumor-normal pairs
+3. Segment copy number changes
+4. Call integer copy numbers
+5. Generate visualizations
+
+### 4. SNP Pileup
+**Purpose**: Extract allele-specific read counts for FACETS
+
+**Parameters**:
+- Minimum base quality: 25
+- Minimum mapping quality: 20
+- Minimum read depth: 10
+
+**VCF Source**: dbSNP common variants (GRCh38)
+
+### 5. FACETS - Purity & Ploidy
+**Purpose**: Estimate tumor purity, ploidy, and refine CNV calls
+
+**Parameters**:
+- Critical value (cval): 50 (more stringent for WGS)
+- Minimum depth: 25
+- Minimum heterozygous SNPs: 15
+- EM iterations: 30
+
+**Outputs**:
+- Tumor purity (fraction of tumor cells)
+- Tumor ploidy (average DNA content)
+- Allele-specific copy number
+- Loss of heterozygosity (LOH) regions
 
 ---
 
-### snp_pileup.sh
-**Purpose:** Generate SNP pileups for FACETS purity/ploidy analysis
+## Troubleshooting
 
-**Resources:**
-- Time: 72 hours
-- CPUs: 4
-- Memory: 64GB
-- Array: 0-3 (processes 4 pairs)
+### Common Issues
 
-**Processing:**
-1. Downloads dbSNP common variants (first run only)
-2. Filters and sorts VCF file
-3. Generates SNP pileup for each tumor-normal pair
-4. Sorts output for FACETS compatibility
-
-**Outputs:**
-- `FACETS/pileups/{patient_id}.sorted.pileup` - Ready for R analysis
-- `FACETS/VCF/out_sorted.vcf` - Processed SNP database
-
-**Next Step:** Run FACETS R script locally with pileup files
-
-## ⚙️ Key Differences from Standard Linux
-
-### 1. Shebang Line
-All scripts MUST use:
+#### Job Submission Fails
 ```bash
-#!/bin/bash -l
-```
-The `-l` flag loads the login environment, which initializes the module system.
+# Error: Invalid account or partition
+# Fix: Check your account
+sacctmgr show associations user=$USER format=account,partition
 
-### 2. SLURM Headers
-Every script requires:
-```bash
-#SBATCH --partition=cpu
-#SBATCH --account=p201093
-#SBATCH --qos=default
+# Update scripts with correct account
+sed -i 's/p201093/YOUR_ACCOUNT/g' ~/Project/scripts/*.sh
 ```
 
-### 3. Module Loading
-Modules only work on compute nodes, not login nodes:
+#### Out of Memory
 ```bash
-module purge
-module load samtools/1.20-foss-2023a
-module load picard/3.2
-module load Java/21.0.5
+# Increase memory in SLURM header
+#SBATCH --mem=128G  # or higher
 ```
 
-### 4. Picard Syntax
-Picard is run via Java:
+#### Missing Conda Environment
 ```bash
-# Correct
-java -jar $PICARD_JAR CollectInsertSizeMetrics ...
+# Reactivate environment
+conda activate wgs_analysis
 
-# Incorrect (will fail)
-picard CollectInsertSizeMetrics ...
+# If missing, recreate
+conda env list
+conda create -n wgs_analysis python=3.10 -y
 ```
 
-### 5. Job Submission
-Use `sbatch` instead of `nohup`:
+#### SNP Pileup Takes Too Long
 ```bash
-# Meluxina
-sbatch script.sh
+# Check if running
+squeue -u $USER
 
-# Old way (doesn't work on HPC)
-nohup ./script.sh > run.log 2>&1 &
+# Increase time limit
+#SBATCH --time=72:00:00
 ```
 
-## 📊 Expected Runtimes
-
-For 4 sample pairs (8 BAM files):
-
-| Step | Time per Pair | Total Time |
-|------|--------------|------------|
-| BAM QC | 1-2 hours | 6-12 hours |
-| BAM Processing | 6-12 hours | 24-48 hours |
-| Coverage | 3-6 hours | 12-24 hours |
-| CNVkit | 6-12 hours | 24-48 hours |
-| SNP Pileup | 12-24 hours | 48-72 hours |
-
-**Total pipeline:** ~5-8 days for 4 pairs
-
-## 💾 Resource Usage
-
-**Typical per job:**
-- BAM QC: ~32GB RAM, 8 CPUs
-- BAM Processing: ~64GB RAM, 16 CPUs per pair
-- Coverage: ~32GB RAM, 8 CPUs
-- CNVkit: ~128GB RAM, 16 CPUs
-- SNP Pileup: ~64GB RAM, 4 CPUs per pair
-
-**Disk Space (per 4 pairs):**
-- Original BAMs: ~100-200 GB
-- Processed BAMs: ~100-200 GB
-- QC outputs: ~5-10 GB
-- CNVkit results: ~10-20 GB
-- FACETS pileups: ~20-40 GB
-- **Total: ~250-500 GB**
-
-## 🔍 Troubleshooting
-
-### Module Command Not Found
-**On login nodes:** This is normal - modules only work on compute nodes
-
-**In SLURM jobs:** Check shebang line is `#!/bin/bash -l`
-
-### Job Fails Immediately
+#### FACETS Fails
 ```bash
-# Check error log
-cat logs/script_name_JOBID.err
+# Check pileup files exist
+ls -lh ~/Project/FACETS/pileups/*.sorted.pileup
 
-# Check job details
-sacct -j JOBID --format=JobID,JobName,State,ExitCode,Elapsed
+# Check R packages
+R -e "library(facets); packageVersion('facets')"
 ```
 
-### Out of Memory
-Increase `#SBATCH --mem=` value in script header
+---
 
-### Job Timeout
-Increase `#SBATCH --time=` value in script header
+## Performance Benchmarks
 
-### Picard Command Not Found
-Make sure you're using:
-```bash
-java -jar $PICARD_JAR CommandName ...
+| Analysis Step | Runtime | Memory | CPUs | Output Size |
+|--------------|---------|--------|------|-------------|
+| BAM QC | 2-4 hrs | 32 GB | 8 | ~500 MB |
+| Coverage | 6-12 hrs | 64 GB | 8 | ~50-100 GB |
+| CNVkit | 12-24 hrs | 128 GB | 16 | ~2-5 GB |
+| SNP Pileup | 24-48 hrs | 64 GB | 4 | ~20-40 GB |
+| FACETS | 2-6 hrs | 32 GB | 4 | ~2 GB |
+
+*Based on 4 tumor-normal pairs, ~40-60x coverage*
+
+---
+
+## Key Publications
+
+### Methods
+- **CNVkit**: Talevich et al. (2016) *PLOS Comput Biol* - [DOI: 10.1371/journal.pcbi.1004873](https://doi.org/10.1371/journal.pcbi.1004873)
+- **FACETS**: Shen & Seshan (2016) *Nucleic Acids Res* - [DOI: 10.1093/nar/gkw520](https://doi.org/10.1093/nar/gkw520)
+
+### Reference
+- **GRCh38**: Genome Reference Consortium - [NCBI](https://www.ncbi.nlm.nih.gov/assembly/GCF_000001405.26/)
+
+---
+
+## Repository Structure
 ```
-Not:
-```bash
-picard CommandName ...
-```
-
-## 📧 Support
-
-**Meluxina Support:** servicedesk@lxp.lu  
-**Documentation:** https://docs.lxp.lu/
-
-## 🔗 Useful Commands
-
-```bash
-# Check job status
-squeue -u u103499
-
-# Check job history
-sacct -u u103499 | tail -20
-
-# Job details
-scontrol show job JOBID
-
-# Cancel job
-scancel JOBID
-
-# Cancel all jobs
-scancel -u u103499
-
-# Check quota
-myquota
-
-# Interactive session (for testing)
-srun --partition=cpu --time=01:00:00 --account=p201093 --qos=default --pty /bin/bash -l
-
-# Watch job queue
-watch -n 10 'squeue -u u103499'
+.
+├── README.md                     # This file
+├── scripts/
+│   ├── bam_qc_check.sh          # BAM quality control
+│   ├── coverage_analysis.sh     # Coverage analysis
+│   ├── cnvkit_analysis.sh       # CNVkit CNV detection
+│   ├── snp_pileup.sh            # FACETS preprocessing
+│   └── facets_analysis.R        # FACETS purity/ploidy
+├── docs/
+│   ├── installation.md          # Detailed installation
+│   ├── parameters.md            # Parameter descriptions
+│   └── interpretation.md        # Result interpretation
+└── LICENSE                       # MIT License
 ```
 
-## 📝 Citation
+---
+
+## Citation
 
 If you use this pipeline, please cite:
+```bibtex
+@software{wgs_uvm_pipeline,
+  author = {Your Name},
+  title = {WGS Analysis Pipeline for Uveal Melanoma},
+  year = {2025},
+  url = {https://github.com/YOUR_USERNAME/wgs-uvm-analysis}
+}
+```
 
-- **Meluxina:** LuxProvide's Meluxina Supercomputer
-- **SAMtools:** Li H, et al. (2009) Bioinformatics
-- **Picard:** Broad Institute
-- **CNVkit:** Talevich E, et al. (2016) PLOS Computational Biology
-- **FACETS:** Shen R & Seshan VE (2016) Nucleic Acids Research
+And cite the individual tools used (CNVkit, FACETS, etc.)
 
-## 📄 License
+---
 
-This pipeline is based on original scripts by S. Owens (2025) and adapted for Meluxina HPC.
+## License
 
-## ✨ Acknowledgments
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-- Meluxina HPC support team for module system guidance
-- Original pipeline development: S. Owens
-- Meluxina adaptation: December 2025
+---
+
+## Contact
+
+**Researcher**: Sally Owens  
+**Institution**: Dublin City University  
+**Email**: sally.owens7@mail.dcu.ie 
+**Project**: Uveal Melanoma WGS Analysis  
+**HPC**: MeluXina
+
+---
+
+## Acknowledgments
+
+- MeluXina HPC for computational resources
+- CNVkit and FACETS development teams
+- The Bioconda community
+
+---
+
+## Version History
+
+- **v1.0.0** (2025-01-XX) - Initial release
+  - BAM QC pipeline
+  - CNVkit WGS analysis
+  - FACETS integration
+  - 4 paired samples processed
+
+---
+
+## Future Development
+
+- [ ] Somatic variant calling integration
+- [ ] Structural variant detection
+- [ ] Automated report generation
+- [ ] Integration with additional CNV callers
+- [ ] Visualization dashboard
+
+---
+
+*Last updated: January 2025*
