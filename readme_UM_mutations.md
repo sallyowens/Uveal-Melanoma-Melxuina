@@ -177,8 +177,8 @@ MIT License - see LICENSE file
 ## Author
 
 Sally Owens  
-Royal College of Surgeons in Ireland / Dublin City University  
-Contact: [your-email]
+Dublin City University  
+Contact: sally.owens7@mail.dcu.ie
 
 ## Acknowledgments
 
