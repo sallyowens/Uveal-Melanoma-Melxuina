@@ -201,7 +201,8 @@ MIT License
 ## Author
 
 Sally Owens  
-Royal College of Surgeons in Ireland / Dublin City University
+Dublin City University  
+Contact: sally.owens7@mail.dcu.ie
 
 ## Acknowledgments
 
